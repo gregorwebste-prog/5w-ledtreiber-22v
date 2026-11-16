@@ -107,6 +107,23 @@ static const int8_t THERM_HYST_C  = 5;
 //   < 40 C: Dauerlicht, 40..49: langsam, 50..59, 60..69, >= 70: sehr schnell
 static const uint16_t TEMP_BLINK_PERIOD[4] = { 1600, 800, 400, 150 };
 
+// ---- Ladeerkennung (nur im Aus-Zustand) ----
+// Die Status-Pins des TP4056 gehen nur auf D5/D6, nicht an den uC. Deshalb Erkennung
+// ueber die Akkuspannung, gemessen 1x pro Sekunde (RTC-PIT weckt aus dem Sleep):
+//  - Ladegeraet an:  Spannung springt um I_Lade * R_innen nach oben (typ. 50..100 mV)
+//  - Ladegeraet ab:  Spannung springt um denselben Betrag nach unten
+//  - voll:           Spannung steigt lange nicht mehr (CV-Phase / Ladeende)
+// Alles relativ ausgewertet -> unabhaengig von der Toleranz der internen Referenz.
+static const uint16_t CHG_STEP_MV     = 30;        // Sprung von Sekunde zu Sekunde
+static const uint16_t CHG_SETTLE_S    = 20;        // nach dem Ausschalten erholt sich der Akku -> abwarten
+static const uint16_t CHG_FULL_MIN_MV = 4050;      // "voll" erst ab dieser Spannung moeglich
+static const uint16_t CHG_FLAT_MV     = 5;         // Anstieg kleiner als das gilt als "steigt nicht mehr"
+static const uint16_t CHG_FLAT_S      = 20 * 60;   // so lange kein Anstieg -> voll
+static const uint16_t CHG_FULL_SHOW_S = 60;        // "voll" so lange anzeigen, dann Anzeige aus
+static const uint16_t CHG_MAX_S       = 10 * 3600; // Sicherheit: spaetestens dann Anzeige beenden
+static const uint16_t CHG_LONG_MS     = 700;       // langer Blinker = "laedt gerade"
+static const uint16_t CHG_GAP_MS      = 2000;      // Pause zwischen den Gruppen
+
 // ============================================================================
 //  Zeitbasis: TCB0, 1 ms Interrupt
 // ============================================================================
@@ -124,6 +141,14 @@ static inline uint16_t now_ms() {
 }
 
 static inline uint16_t since(uint16_t t0, uint16_t now) { return (uint16_t)(now - t0); }
+
+// RTC-PIT: 1-s-Takt, laeuft auch im Power-Down (Ladeerkennung)
+static volatile bool g_pitTick = false;
+
+ISR(RTC_PIT_vect) {
+    RTC.PITINTFLAGS = RTC_PI_bm;
+    g_pitTick = true;
+}
 
 // Pin-Change am Taster: nur zum Aufwachen
 ISR(PORTA_PORT_vect) {
@@ -150,6 +175,13 @@ static void initTimers() {
     TCA0.SINGLE.CMP0    = 0;
     TCA0.SINGLE.CTRLB   = TCA_SINGLE_WGMODE_SINGLESLOPE_gc;   // CMP0EN erst bei duty > 0
     TCA0.SINGLE.CTRLA   = TCA_SINGLE_CLKSEL_DIV8_gc | TCA_SINGLE_ENABLE_bm;
+
+    // RTC-PIT: interner 1,024-kHz-Takt (OSCULP32K), Interrupt jede Sekunde
+    while (RTC.STATUS > 0) {}
+    RTC.CLKSEL = RTC_CLKSEL_INT1K_gc;
+    while (RTC.PITSTATUS > 0) {}
+    RTC.PITINTCTRL = RTC_PI_bm;
+    RTC.PITCTRLA   = RTC_PERIOD_CYC1024_gc | RTC_PITEN_bm;
 }
 
 static void initAdc() {
@@ -297,6 +329,16 @@ static const uint16_t BATT_PAUSE_MS = 1000;  // Pause davor und danach
 static const uint16_t BATT_ON_MS    = 120;
 static const uint16_t BATT_OFF_MS   = 180;
 
+// Ladeerkennung
+enum ChgState : uint8_t { CHG_NONE, CHG_ACTIVE, CHG_FULL };
+static ChgState chgState  = CHG_NONE;
+static uint16_t chgSettleS = 0;     // Sekunden im Aus-Zustand (Erholung abwarten)
+static uint16_t chgRefMv;           // Messwert der letzten Sekunde
+static uint16_t chgMaxMv;           // hoechster Wert waehrend der Ladung
+static uint16_t chgS, chgFlatS;     // Ladedauer / Sekunden ohne Anstieg
+static uint8_t  chgLevel;           // Akkustand 1..6 fuer die Anzeige
+static uint16_t chgT0;              // Start der aktuellen Blink-Gruppe
+
 static uint8_t maxLevel() {
     uint8_t m = thermMax;
     if (lowBatt && LOWBAT_MAX_LEVEL < m) m = LOWBAT_MAX_LEVEL;
@@ -315,14 +357,20 @@ static void setMode(Mode m, uint16_t now) {
     lowSince = critSince = now;
     secT = now;
     fullSec = 0;
+    chgState = CHG_NONE;            // Ladeanzeige nur im Aus-Zustand
+    chgSettleS = 0;                 // nach jedem Moduswechsel neu einschwingen lassen
     if (m != MODE_OFF && lowBatt) startDoubleBlink(now);   // Erinnerung: Akku schwach
 }
 
-static void startBatteryDisplay(uint16_t now) {
+static uint8_t battLevel(uint16_t mv) {
     uint8_t n = 1;
     for (uint8_t i = 0; i < 5; i++)
-        if (vbatMv >= BATT_STEPS_MV[i]) n++;
-    battShowCount  = n;
+        if (mv >= BATT_STEPS_MV[i]) n++;
+    return n;
+}
+
+static void startBatteryDisplay(uint16_t now) {
+    battShowCount  = battLevel(vbatMv);
     battShowT0     = now;
     battShowActive = true;
 }
@@ -494,6 +542,55 @@ static void monitorUpdate(uint16_t now) {
 }
 
 // ============================================================================
+//  Ladeerkennung: 1x pro Sekunde im Aus-Zustand aufrufen
+// ============================================================================
+static void chargeTick(uint16_t now) {
+    if (mode != MODE_OFF) return;
+    uint16_t v = readVbatMv();                  // ungefiltert, PWM ist aus -> ohne Last
+
+    switch (chgState) {
+    case CHG_NONE:
+        if (chgSettleS < CHG_SETTLE_S) {
+            chgSettleS++;                       // Akku erholt sich noch vom Betrieb
+        } else if (v >= chgRefMv + CHG_STEP_MV) {
+            chgState = CHG_ACTIVE;              // Sprung nach oben -> Ladegeraet angesteckt
+            chgS = chgFlatS = 0;
+            chgMaxMv = v;
+            chgT0 = now;
+        }
+        break;
+
+    case CHG_ACTIVE:
+        if (v + CHG_STEP_MV <= chgRefMv) {      // Sprung nach unten -> abgesteckt
+            chgState = CHG_NONE;
+            chgSettleS = 0;
+            break;
+        }
+        if (v > chgMaxMv + CHG_FLAT_MV) { chgMaxMv = v; chgFlatS = 0; }
+        else                              chgFlatS++;
+        if (chgMaxMv >= CHG_FULL_MIN_MV && chgFlatS >= CHG_FLAT_S) {
+            chgState = CHG_FULL;                // steigt nicht mehr -> voll
+            chgS = 0;
+        } else if (++chgS >= CHG_MAX_S) {
+            chgState = CHG_NONE;                // Notbremse, falls "voll" nie erkannt wird
+            chgSettleS = 0;
+        }
+        break;
+
+    case CHG_FULL:
+        // Wann abgesteckt wird, ist bei vollem Akku nicht erkennbar (kaum Strom
+        // -> kein Sprung). Deshalb "voll" nur eine Zeit lang zeigen, dann aus.
+        if (++chgS >= CHG_FULL_SHOW_S) {
+            chgState = CHG_NONE;
+            chgSettleS = 0;
+        }
+        break;
+    }
+    chgRefMv = v;
+    chgLevel = battLevel(v);
+}
+
+// ============================================================================
 //  Ausgaenge berechnen
 // ============================================================================
 static void outputUpdate(uint16_t now) {
@@ -530,6 +627,17 @@ static void outputUpdate(uint16_t now) {
         } else {
             battShowActive = false;
         }
+    } else if (mode == MODE_OFF && chgState == CHG_ACTIVE) {
+        // Laden: (Akkustand-1) kurze Blitzer + 1 langer Blinker ("laedt"), Pause, wiederholen
+        uint16_t shortP = BATT_ON_MS + BATT_OFF_MS;
+        uint16_t shorts = (uint16_t)(chgLevel - 1) * shortP;
+        uint16_t cyc    = shorts + CHG_LONG_MS + CHG_GAP_MS;
+        uint16_t e      = since(chgT0, now);
+        if (e >= cyc) { chgT0 = now; e = 0; }   // neue Gruppe (neuer Akkustand wird uebernommen)
+        if (e < shorts) tled = (e % shortP) < BATT_ON_MS;
+        else            tled = (e - shorts) < CHG_LONG_MS;
+    } else if (mode == MODE_OFF && chgState == CHG_FULL) {
+        tled = true;                            // voll: Dauerlicht
     } else if (mode != MODE_OFF) {
         // Temperaturanzeige
         if (tempC < 40) {
@@ -548,7 +656,7 @@ static void outputUpdate(uint16_t now) {
 // ============================================================================
 static bool canSleep() {
     return mode == MODE_OFF && !btnRaw && !btnStable && clicks == 0 &&
-           !battShowActive && !blinkActive;
+           !battShowActive && !blinkActive && chgState == CHG_NONE;
 }
 
 static void goToSleep() {
@@ -570,6 +678,8 @@ static void goToSleep() {
 
     TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;
     initAdc();
+    if (g_pitTick && (PORTA.IN & BTN_bm)) return;   // nur RTC-Wecker: chargeTick misst selbst
+
     vbatMv = readVbatMv();            // frischer Wert (z.B. fuer Akkuanzeige aus dem Aus-Zustand)
     tempC  = readTempC();
     updateThermalLimit();
@@ -597,6 +707,10 @@ void loop() {
     uint16_t now = now_ms();
     buttonUpdate(now);
     monitorUpdate(now);
+    if (g_pitTick) {                  // 1-s-Takt der RTC
+        g_pitTick = false;
+        chargeTick(now);
+    }
     outputUpdate(now);
 
     if (canSleep()) goToSleep();

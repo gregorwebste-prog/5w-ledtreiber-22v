@@ -132,7 +132,34 @@ Auf Stufe 5 (Dauer-high) gibt es keine Aus-Phase → pauschaler Zuschlag `LOAD_S
 | 60 – 69 °C | 0,4 s |
 | ≥ 70 °C | sehr schnell (0,15 s) |
 
-Wenn das Licht aus ist, ist die Taster-LED aus (außer bei der Akkuanzeige).
+Wenn das Licht aus ist, ist die Taster-LED aus (außer bei Akkuanzeige und Ladeanzeige).
+
+### Laden (im ausgeschalteten Zustand)
+
+Die Status-Pins des TP4056 gehen nur auf D5/D6, **nicht an den ATtiny**. Darum erkennt die Firmware
+das Laden über die Akkuspannung. Die RTC (PIT) weckt den ATtiny dazu **jede Sekunde** kurz auf.
+
+| Ereignis | Erkennung |
+|---|---|
+| Ladegerät angesteckt | Spannung springt innerhalb 1 s um ≥ 30 mV **nach oben** (Ladestrom × Innenwiderstand) |
+| Ladegerät abgesteckt | Spannung springt um ≥ 30 mV **nach unten** |
+| Akku voll | Spannung ≥ 4,05 V und steigt **20 min lang nicht mehr** (CV-Phase bzw. Ladeende) |
+
+Anzeige auf der Taster-LED:
+
+| Zustand | Muster |
+|---|---|
+| lädt | **(Akkustand − 1) kurze Blitzer + 1 langer Blinker (0,7 s)**, 2 s Pause, wiederholt sich. Der lange Blinker heißt „lädt gerade“. Beispiel Akkustand 4: · · · ▬ |
+| voll | **1 min Dauerlicht**, dann aus |
+
+Einschränkungen:
+- Bei vollem Akku fließt kaum noch Strom, das Abstecken ist dann nicht mehr erkennbar.
+  Deshalb wird „voll“ nur 1 min angezeigt und danach abgeschaltet.
+- Erkannt wird nur das **Anstecken im ausgeschalteten Zustand**. Nach dem Ausschalten wartet die Firmware 20 s, bis sich der Akku erholt hat.
+  Wird die Lampe während des Ladens eingeschaltet, endet die Ladeanzeige. Nach dem Ausschalten erkennt sie das Laden erst beim nächsten Anstecken wieder.
+- Während der Ladeanzeige schläft der ATtiny nicht (≈ 1–2 mA, kommt ja vom Ladegerät).
+  Spätestens nach 10 h endet die Anzeige auf jeden Fall.
+- Der Akkustand während des Ladens ist etwas zu hoch, weil die Ladespannung mitgemessen wird.
 
 ---
 
@@ -161,7 +188,9 @@ Einschalten ist immer möglich – die Schwellen betreffen nur die Drosselung.
 Im ausgeschalteten Zustand geht der ATtiny in **Power-Down-Sleep**. ADC, Referenz und Timer sind aus,
 Aufwachen per Pin-Interrupt am Taster (PA6). Der LM3410 ist über DIM = low (R11 Pull-down) im Shutdown (~80 nA).
 
-Ruhestrom ca. 25 µA, hauptsächlich der NTC-Teiler (R8 + NTC ≈ 20 µA) und der DW01A.
+Zusätzlich läuft die RTC (PIT, interner 1-kHz-Oszillator) und weckt jede Sekunde für ca. 2 ms zur Ladeerkennung (im Mittel wenige µA).
+
+Ruhestrom ca. 25–30 µA, hauptsächlich der NTC-Teiler (R8 + NTC ≈ 20 µA) und der DW01A.
 
 ---
 
@@ -173,7 +202,7 @@ Ruhestrom ca. 25 µA, hauptsächlich der NTC-Teiler (R8 + NTC ≈ 20 µA) und de
 - **ADC:** 10 bit, 16-fach aufsummiert, Referenz VDD; alle 125 ms abwechselnd Akku und NTC, gefiltert
 - **Taster:** 25 ms Entprellung, Klick-Pakete mit 350 ms Pause; Aktionen teils sofort beim Klick
   (`onClickImmediate`), teils nach Paket-Ende (`onClicksDone`)
-- Nicht blockierend: `loop()` ruft nur `buttonUpdate()`, `monitorUpdate()`, `outputUpdate()` auf
+- Nicht blockierend: `loop()` ruft `buttonUpdate()`, `monitorUpdate()`, `outputUpdate()` und 1× pro Sekunde (RTC-PIT) `chargeTick()` auf
 
 ### Einstellbare Werte (oben in `src/main.cpp`)
 
@@ -195,6 +224,9 @@ Ruhestrom ca. 25 µA, hauptsächlich der NTC-Teiler (R8 + NTC ≈ 20 µA) und de
 | `NTC_TAB[]` | | ADC-Werte für 0 … 100 °C (B = 3950) |
 | `THERM_WARN_C` / `THERM_HOT_C` | 70 / 80 | thermische Drosselung |
 | `TEMP_BLINK_PERIOD[]` | 1600, 800, 400, 150 | Blinkperioden Temperaturanzeige |
+| `CHG_STEP_MV` | 30 | Spannungssprung = Ladegerät an/ab |
+| `CHG_FULL_MIN_MV` / `CHG_FLAT_S` | 4050 / 1200 | „voll“: ab 4,05 V und 20 min kein Anstieg |
+| `CHG_FULL_SHOW_S` | 60 | Dauer der „voll“-Anzeige |
 
 ### Akkumessung kalibrieren
 
@@ -227,7 +259,7 @@ Programmiert wird über **UPDI** (Pin 6 / PA0, Stecker „Prog“) mit einem Ser
 (CP210x USB-UART, TX/RX über Diode/Widerstand auf UPDI). Upload: `pio run -t upload`.
 Falls der Adapter eine andere COM-Nummer bekommt, `upload_port` anpassen.
 
-Speicherbedarf: ca. 2,7 kB von 4 kB Flash, 43 Byte RAM.
+Speicherbedarf: ca. 3,2 kB von 4 kB Flash, 58 Byte RAM.
 
 ---
 
@@ -255,5 +287,6 @@ Speicherbedarf: ca. 2,7 kB von 4 kB Flash, 43 Byte RAM.
 |---|---|
 | `v1.0` | Grundfunktion: Bedienung, Stufen, Strobe, Akku-/Temperaturanzeige, Schutzfunktionen, Akkumessung in der PWM-Aus-Phase |
 | `v1.1` | Schnellere Akkuanzeige (120 ms an / 180 ms aus, 1 s Pause davor/danach) |
+| `v1.2` | Ladeerkennung über die Akkuspannung, Ladeanzeige auf der Taster-LED im Aus-Zustand |
 
 Zurück auf eine Version: `git checkout v1.0` (danach `pio run -t upload`), zurück zum neuesten Stand: `git checkout main`.
