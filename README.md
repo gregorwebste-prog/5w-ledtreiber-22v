@@ -110,8 +110,8 @@ Startstufe beim ersten Einschalten nach Akkuwechsel: Stufe 3.
 
 ### Akkustand
 
-Ablauf: **0,8 s Pause → 1…6 Blinker (je 250 ms an / 300 ms aus) → 0,8 s Pause**,
-danach wieder Temperaturanzeige.
+Ablauf: **1 s Pause → 1…6 kurze Blitzer (je 120 ms an / 180 ms aus) → 1 s Pause**,
+danach wieder Temperaturanzeige. Die Blitzer sind deutlich kürzer an als aus – die Temperaturanzeige blinkt dagegen immer 50:50, so kann man beides auseinanderhalten.
 
 | Blinker | 1 | 2 | 3 | 4 | 5 | 6 |
 |---|---|---|---|---|---|---|
@@ -254,5 +254,6 @@ Speicherbedarf: ca. 2,7 kB von 4 kB Flash, 43 Byte RAM.
 | Tag | Inhalt |
 |---|---|
 | `v1.0` | Grundfunktion: Bedienung, Stufen, Strobe, Akku-/Temperaturanzeige, Schutzfunktionen, Akkumessung in der PWM-Aus-Phase |
+| `v1.1` | Schnellere Akkuanzeige (120 ms an / 180 ms aus, 1 s Pause davor/danach) |
 
 Zurück auf eine Version: `git checkout v1.0` (danach `pio run -t upload`), zurück zum neuesten Stand: `git checkout main`.

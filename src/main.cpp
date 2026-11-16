@@ -291,9 +291,11 @@ static bool     battShowActive = false;
 static uint16_t battShowT0;
 static uint8_t  battShowCount;
 
-static const uint16_t BATT_PAUSE_MS = 800;   // Pause davor und danach
-static const uint16_t BATT_ON_MS    = 250;
-static const uint16_t BATT_OFF_MS   = 300;
+// Kurze, knackige Blitzer (an deutlich kuerzer als aus) -> unterscheidbar von der
+// Temperaturanzeige, die immer 50:50 blinkt. Die Dunkelpause davor/danach trennt zusaetzlich.
+static const uint16_t BATT_PAUSE_MS = 1000;  // Pause davor und danach
+static const uint16_t BATT_ON_MS    = 120;
+static const uint16_t BATT_OFF_MS   = 180;
 
 static uint8_t maxLevel() {
     uint8_t m = thermMax;
