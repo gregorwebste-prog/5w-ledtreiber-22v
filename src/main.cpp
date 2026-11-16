@@ -76,14 +76,18 @@ static const uint16_t STROBE_OFF_MS = 50;
 // Interne Referenz 1.1 V (Toleranz ein paar %). Wenn der angezeigte Wert nicht
 // stimmt: VREF_MV = 1100 * U_echt / U_gemessen anpassen.
 static const uint32_t VREF_MV          = 1100;
-static const uint16_t LOWBAT_MV        = 3300;  // drosseln
+// Drosselung in 2 Schritten (jeweils mit Doppelblink der Haupt-LED):
+static const uint16_t LOWBAT1_MV        = 3300;  // darunter max. Stufe 4
+static const uint8_t  LOWBAT1_MAX_LEVEL = 3;     //   (Index 0..4)
+static const uint16_t LOWBAT2_MV        = 3150;  // darunter max. Stufe 3
+static const uint8_t  LOWBAT2_MAX_LEVEL = 2;
 // Drossel aufheben: nur im Aus-Zustand (ohne Last) gemessen. Unter Last bricht die
 // Spannung etwas ein, beim Drosseln erholt sie sich wieder -> ohne Hysterese wuerde
 // es dauernd zwischen gedrosselt und voll hin und her springen.
-static const uint16_t LOWBAT_RESET_MV  = 3400;
-static const uint16_t CRITBAT_MV       = 3000;  // abschalten
-static const uint16_t BAT_FILTER_MS    = 2000;  // so lange muss die Schwelle unterschritten sein
-static const uint8_t  LOWBAT_MAX_LEVEL = 1;     // max. Stufe bei leerem Akku (0..4)
+static const uint16_t LOWBAT_RESET_MV   = 3400;  // ab hier ganz aufgehoben
+static const uint16_t LOWBAT2_RESET_MV  = 3250;  // ab hier zurueck auf Schritt 1
+static const uint16_t CRITBAT_MV        = 3000;  // abschalten
+static const uint16_t BAT_FILTER_MS     = 2000;  // so lange muss die Schwelle unterschritten sein
 
 // Akkuanzeige: Anzahl Blinker = 1 + Anzahl ueberschrittener Schwellen (1..6)
 // Bereich 3.0 V (leer) .. 4.2 V (voll):
@@ -306,7 +310,7 @@ static uint16_t strobeT0  = 0;
 
 static uint16_t vbatMv    = 4000;   // gefiltert
 static int8_t   tempC     = 25;     // gefiltert
-static bool     lowBatt   = false;  // Drossel aktiv (bleibt bis Akku wieder >= LOWBAT_RESET_MV)
+static uint8_t  lowStage  = 0;      // Akku-Drossel: 0 = keine, 1 = max. Stufe 4, 2 = max. Stufe 3
 static uint8_t  thermMax  = NUM_LEVELS - 1;
 static uint16_t lowSince, critSince;
 static uint16_t lastMeasT = 0;
@@ -339,9 +343,16 @@ static uint16_t chgS, chgFlatS;     // Ladedauer / Sekunden ohne Anstieg
 static uint8_t  chgLevel;           // Akkustand 1..6 fuer die Anzeige
 static uint16_t chgT0;              // Start der aktuellen Blink-Gruppe
 
+// Nur im Aus-Zustand (Messung ohne Last): Drossel schrittweise aufheben
+static void releaseLowStage() {
+    if (vbatMv >= LOWBAT_RESET_MV)                         lowStage = 0;
+    else if (vbatMv >= LOWBAT2_RESET_MV && lowStage > 1)   lowStage = 1;
+}
+
 static uint8_t maxLevel() {
     uint8_t m = thermMax;
-    if (lowBatt && LOWBAT_MAX_LEVEL < m) m = LOWBAT_MAX_LEVEL;
+    if (lowStage == 1 && LOWBAT1_MAX_LEVEL < m) m = LOWBAT1_MAX_LEVEL;
+    if (lowStage >= 2 && LOWBAT2_MAX_LEVEL < m) m = LOWBAT2_MAX_LEVEL;
     return m;
 }
 
@@ -359,7 +370,7 @@ static void setMode(Mode m, uint16_t now) {
     fullSec = 0;
     chgState = CHG_NONE;            // Ladeanzeige nur im Aus-Zustand
     chgSettleS = 0;                 // nach jedem Moduswechsel neu einschwingen lassen
-    if (m != MODE_OFF && lowBatt) startDoubleBlink(now);   // Erinnerung: Akku schwach
+    if (m != MODE_OFF && lowStage) startDoubleBlink(now);  // Erinnerung: Akku schwach
 }
 
 static uint8_t battLevel(uint16_t mv) {
@@ -408,7 +419,8 @@ static void onClickImmediate(uint8_t n, uint16_t now) {
 static void onClicksDone(uint8_t n, uint16_t now) {
     if (seqMode == MODE_ON) {
         if (n == 1) {
-            if (level < maxLevel()) level++;        // heller
+            if (level < maxLevel())  level++;       // heller
+            else if (lowStage)       startDoubleBlink(now);  // gesperrt wegen Akku -> Doppelblink
         } else if (n == 2) {
             setMode(MODE_OFF, now);                 // aus (muss auf moeglichen 3. Klick warten)
         }
@@ -518,10 +530,12 @@ static void monitorUpdate(uint16_t now) {
     }
 
     if (mode != MODE_OFF) {
-        // Akku schwach -> drosseln + Doppelblink
-        if (vbatMv < LOWBAT_MV) {
-            if (!lowBatt && since(lowSince, now) >= BAT_FILTER_MS) {
-                lowBatt = true;
+        // Akku schwach -> naechsten Drossel-Schritt + Doppelblink
+        uint16_t thr = (lowStage == 0) ? LOWBAT1_MV : LOWBAT2_MV;
+        if (lowStage < 2 && vbatMv < thr) {
+            if (since(lowSince, now) >= BAT_FILTER_MS) {
+                lowStage++;
+                lowSince = now;
                 startDoubleBlink(now);
             }
         } else {
@@ -537,7 +551,7 @@ static void monitorUpdate(uint16_t now) {
         }
     } else {
         lowSince = critSince = now;
-        if (vbatMv >= LOWBAT_RESET_MV) lowBatt = false;
+        releaseLowStage();
     }
 }
 
@@ -683,7 +697,7 @@ static void goToSleep() {
     vbatMv = readVbatMv();            // frischer Wert (z.B. fuer Akkuanzeige aus dem Aus-Zustand)
     tempC  = readTempC();
     updateThermalLimit();
-    if (vbatMv >= LOWBAT_RESET_MV) lowBatt = false;
+    releaseLowStage();
 }
 
 // ============================================================================

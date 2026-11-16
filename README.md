@@ -167,9 +167,11 @@ Einschränkungen:
 
 | Bedingung | Reaktion |
 |---|---|
-| Akku < **3,3 V** für 2 s (unter Last) | Drosselung auf max. Stufe 2 + **Haupt-LED Doppelblink** |
+| Akku < **3,3 V** für 2 s | Drosselung auf max. **Stufe 4** + **Haupt-LED Doppelblink** |
+| Akku < **3,15 V** für 2 s | Drosselung auf max. **Stufe 3** + **Haupt-LED Doppelblink** |
 | Drosselung aktiv und Einschalten | Haupt-LED Doppelblink als Erinnerung |
-| Akku ≥ **3,4 V** im ausgeschalteten Zustand (ohne Last) | Drosselung aufgehoben |
+| Akku ≥ **3,25 V** / **3,4 V** im ausgeschalteten Zustand (ohne Last) | Drosselung zurück auf Schritt 1 / ganz aufgehoben |
+| Hochschalten über die erlaubte Stufe (Akku-Drosselung) | Haupt-LED Doppelblink, Stufe bleibt |
 | Akku < **3,0 V** für 2 s | Licht aus |
 | Platine ≥ **70 °C** | max. Stufe 3 (Freigabe unter 65 °C) |
 | Platine ≥ **80 °C** | max. Stufe 1 (Freigabe unter 75 °C → Stufe 3) |
@@ -216,10 +218,10 @@ Ruhestrom ca. 25–30 µA, hauptsächlich der NTC-Teiler (R8 + NTC ≈ 20 µA) u
 | `FULL_TIMEOUT_S` | 900 | Vollgas-Timer (15 min) |
 | `STROBE_ON_MS` / `STROBE_OFF_MS` | 30 / 50 | Strobe-Timing |
 | `VREF_MV` | 1100 | interne Referenz – **zum Kalibrieren** |
-| `LOWBAT_MV` | 3300 | Drosselung |
-| `LOWBAT_RESET_MV` | 3400 | Drosselung aufheben (im Aus-Zustand) |
+| `LOWBAT1_MV` / `LOWBAT2_MV` | 3300 / 3150 | Drosselung Schritt 1 / 2 |
+| `LOWBAT_RESET_MV` / `LOWBAT2_RESET_MV` | 3400 / 3250 | Drosselung ganz / auf Schritt 1 aufheben (im Aus-Zustand) |
 | `CRITBAT_MV` | 3000 | Abschaltung |
-| `LOWBAT_MAX_LEVEL` | 1 | max. Stufe bei Drosselung (Index → Stufe 2) |
+| `LOWBAT1_MAX_LEVEL` / `LOWBAT2_MAX_LEVEL` | 3 / 2 | max. Stufe bei Drosselung (Index → Stufe 4 / Stufe 3) |
 | `BATT_STEPS_MV[]` | 3300 … 4000 | Schwellen der Akkuanzeige |
 | `NTC_TAB[]` | | ADC-Werte für 0 … 100 °C (B = 3950) |
 | `THERM_WARN_C` / `THERM_HOT_C` | 70 / 80 | thermische Drosselung |
@@ -259,7 +261,7 @@ Programmiert wird über **UPDI** (Pin 6 / PA0, Stecker „Prog“) mit einem Ser
 (CP210x USB-UART, TX/RX über Diode/Widerstand auf UPDI). Upload: `pio run -t upload`.
 Falls der Adapter eine andere COM-Nummer bekommt, `upload_port` anpassen.
 
-Speicherbedarf: ca. 3,2 kB von 4 kB Flash, 58 Byte RAM.
+Speicherbedarf: ca. 3,3 kB von 4 kB Flash, 58 Byte RAM.
 
 ---
 
@@ -271,7 +273,7 @@ Speicherbedarf: ca. 3,2 kB von 4 kB Flash, 58 Byte RAM.
 2. **Ausgangskondensatoren C7/C10** müssen mindestens **35 V** Spannungsfestigkeit haben
    (Keramik verliert bei DC-Bias viel Kapazität).
 3. **Spule L1:** Sättigungsstrom ≥ 2,5 A (Spitzenstrom bei leerem Akku > 2 A).
-4. **Eingangsstrom:** bei 3,3 V ca. 1,9 A, Schalter-Stromgrenze LM3410 min. 2,1 A → knapp, Drosselung bei 3,3 V hilft.
+4. **Eingangsstrom:** gemessen ca. **2,3 A bei 3,5 V auf Stufe 5** (inkl. Verlust am Amperemeter) → Wirkungsgrad ca. 70 %. Spitzenstrom im Schalter ca. 2,5–2,8 A, Stromgrenze LM3410 min. 2,1 / typ. 2,7 A → an der Grenze; bei niedriger Akkuspannung kann die LED auf Stufe 5 etwas dunkler werden (harmlos). Prüfen: Spannung über Rsense soll 190 mV sein.
 5. **COB-Temperatur wird nicht gemessen:** ausreichende Kühlung nötig (Ts max. 85 °C).
 6. **NTC-B-Wert** (3950) ist angenommen – bei anderem NTC `NTC_TAB[]` neu berechnen:
    `R = 100k · exp(B · (1/T − 1/298,15))`, `ADC = 1023 · R / (R + 100k)`.
@@ -288,5 +290,6 @@ Speicherbedarf: ca. 3,2 kB von 4 kB Flash, 58 Byte RAM.
 | `v1.0` | Grundfunktion: Bedienung, Stufen, Strobe, Akku-/Temperaturanzeige, Schutzfunktionen, Akkumessung in der PWM-Aus-Phase |
 | `v1.1` | Schnellere Akkuanzeige (120 ms an / 180 ms aus, 1 s Pause davor/danach) |
 | `v1.2` | Ladeerkennung über die Akkuspannung, Ladeanzeige auf der Taster-LED im Aus-Zustand |
+| `v1.3` | Akku-Drosselung in 2 Schritten (3,3 V → max. Stufe 4, 3,15 V → max. Stufe 3), Doppelblink beim Hochschalten über die erlaubte Stufe |
 
 Zurück auf eine Version: `git checkout v1.0` (danach `pio run -t upload`), zurück zum neuesten Stand: `git checkout main`.
