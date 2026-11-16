@@ -10,7 +10,7 @@ Bedienung über einen Taster mit eigener Taster-LED.
 
 | Baugruppe | Bauteil | Funktion |
 |---|---|---|
-| Akku | 1× Li-Ion, 3500 mAh | VCC_Batt (3,0 … 4,2 V) |
+| Akku | 1× Li-Ion, 3500 mAh | VCC_Batt (2,8 … 4,2 V) |
 | Akkuschutz | DW01A + FS8205A | Über-/Tiefentladung, Überstrom |
 | Laden | TP4056 über USB-C | 5 V → Akku, Status-LEDs D5 (grün) / D6 (rot) |
 | µC | ATtiny402 | VDD = VCC_Batt direkt |
@@ -36,7 +36,7 @@ Bedienung über einen Taster mit eigener Taster-LED.
 | D5 / D6 | LED grün / rot | | Ladestatus TP4056 (nicht am µC) |
 | L1 | Speicherdrossel | Sättigungsstrom ≥ 2,5 A nötig | |
 | C7 / C10 | Ausgangskondensatoren | ≥ 35 V nötig | |
-| Akku | Li-Ion 18650 o. ä. | 3500 mAh | nutzbar bis 3,0 V |
+| Akku | Li-Ion 18650 o. ä. | 3500 mAh | nutzbar bis 2,8 V (Bereich 3,0–2,8 V nur Stufe 1, ca. 20 mAh) |
 
 ### Pinbelegung ATtiny402
 
@@ -169,10 +169,11 @@ Einschränkungen:
 |---|---|
 | Akku < **3,3 V** für 2 s | Drosselung auf max. **Stufe 4** + **Haupt-LED Doppelblink** |
 | Akku < **3,15 V** für 2 s | Drosselung auf max. **Stufe 3** + **Haupt-LED Doppelblink** |
+| Akku < **3,0 V** für 2 s | Drosselung auf max. **Stufe 1** + **Haupt-LED Doppelblink** |
 | Drosselung aktiv und Einschalten | Haupt-LED Doppelblink als Erinnerung |
-| Akku ≥ **3,25 V** / **3,4 V** im ausgeschalteten Zustand (ohne Last) | Drosselung zurück auf Schritt 1 / ganz aufgehoben |
+| Akku ≥ **3,1 V** / **3,25 V** / **3,4 V** im ausgeschalteten Zustand (ohne Last) | jeweils ein Drosselschritt fällt weg (ab 3,4 V ganz aufgehoben) |
 | Hochschalten über die erlaubte Stufe (Akku-Drosselung) | Haupt-LED Doppelblink, Stufe bleibt |
-| Akku < **3,0 V** für 2 s | Licht aus |
+| Akku < **2,8 V** für 2 s | Licht aus |
 | Platine ≥ **70 °C** | max. Stufe 3 (Freigabe unter 65 °C) |
 | Platine ≥ **80 °C** | max. Stufe 1 (Freigabe unter 75 °C → Stufe 3) |
 | **15 min** ununterbrochen auf Stufe 5 | automatisch 1 Stufe runter, manuell wieder hochschaltbar (Timer startet neu) |
@@ -218,10 +219,9 @@ Ruhestrom ca. 25–30 µA, hauptsächlich der NTC-Teiler (R8 + NTC ≈ 20 µA) u
 | `FULL_TIMEOUT_S` | 900 | Vollgas-Timer (15 min) |
 | `STROBE_ON_MS` / `STROBE_OFF_MS` | 30 / 50 | Strobe-Timing |
 | `VREF_MV` | 1100 | interne Referenz – **zum Kalibrieren** |
-| `LOWBAT1_MV` / `LOWBAT2_MV` | 3300 / 3150 | Drosselung Schritt 1 / 2 |
-| `LOWBAT_RESET_MV` / `LOWBAT2_RESET_MV` | 3400 / 3250 | Drosselung ganz / auf Schritt 1 aufheben (im Aus-Zustand) |
-| `CRITBAT_MV` | 3000 | Abschaltung |
-| `LOWBAT1_MAX_LEVEL` / `LOWBAT2_MAX_LEVEL` | 3 / 2 | max. Stufe bei Drosselung (Index → Stufe 4 / Stufe 3) |
+| `LOWBAT_MV[]` / `LOWBAT_MAX[]` | 3300, 3150, 3000 / 3, 2, 0 | Drosselschritte: Schwelle → max. Stufe (Index → Stufe 4, 3, 1) |
+| `LOWBAT_RESET_MV[]` | 3400, 3250, 3100 | Drosselschritt fällt im Aus-Zustand wieder weg |
+| `CRITBAT_MV` | 2800 | Abschaltung |
 | `BATT_STEPS_MV[]` | 3300 … 4000 | Schwellen der Akkuanzeige |
 | `NTC_TAB[]` | | ADC-Werte für 0 … 100 °C (B = 3950) |
 | `THERM_WARN_C` / `THERM_HOT_C` | 70 / 80 | thermische Drosselung |
@@ -291,5 +291,6 @@ Speicherbedarf: ca. 3,3 kB von 4 kB Flash, 58 Byte RAM.
 | `v1.1` | Schnellere Akkuanzeige (120 ms an / 180 ms aus, 1 s Pause davor/danach) |
 | `v1.2` | Ladeerkennung über die Akkuspannung, Ladeanzeige auf der Taster-LED im Aus-Zustand |
 | `v1.3` | Akku-Drosselung in 2 Schritten (3,3 V → max. Stufe 4, 3,15 V → max. Stufe 3), Doppelblink beim Hochschalten über die erlaubte Stufe |
+| `v1.4` | 3. Drosselschritt: unter 3,0 V nur noch Stufe 1, Abschaltung erst bei 2,8 V |
 
 Zurück auf eine Version: `git checkout v1.0` (danach `pio run -t upload`), zurück zum neuesten Stand: `git checkout main`.

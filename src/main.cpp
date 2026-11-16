@@ -76,17 +76,16 @@ static const uint16_t STROBE_OFF_MS = 50;
 // Interne Referenz 1.1 V (Toleranz ein paar %). Wenn der angezeigte Wert nicht
 // stimmt: VREF_MV = 1100 * U_echt / U_gemessen anpassen.
 static const uint32_t VREF_MV          = 1100;
-// Drosselung in 2 Schritten (jeweils mit Doppelblink der Haupt-LED):
-static const uint16_t LOWBAT1_MV        = 3300;  // darunter max. Stufe 4
-static const uint8_t  LOWBAT1_MAX_LEVEL = 3;     //   (Index 0..4)
-static const uint16_t LOWBAT2_MV        = 3150;  // darunter max. Stufe 3
-static const uint8_t  LOWBAT2_MAX_LEVEL = 2;
-// Drossel aufheben: nur im Aus-Zustand (ohne Last) gemessen. Unter Last bricht die
-// Spannung etwas ein, beim Drosseln erholt sie sich wieder -> ohne Hysterese wuerde
-// es dauernd zwischen gedrosselt und voll hin und her springen.
-static const uint16_t LOWBAT_RESET_MV   = 3400;  // ab hier ganz aufgehoben
-static const uint16_t LOWBAT2_RESET_MV  = 3250;  // ab hier zurueck auf Schritt 1
-static const uint16_t CRITBAT_MV        = 3000;  // abschalten
+// Drosselung in Schritten (jeder Schritt mit Doppelblink der Haupt-LED).
+// Schritt i wird aktiv, wenn der Akku 2 s unter LOWBAT_MV[i] liegt -> max. Stufe LOWBAT_MAX[i].
+// Drossel aufheben: nur im Aus-Zustand (ohne Last), ab LOWBAT_RESET_MV[i] faellt
+// Schritt i wieder weg. Ohne diese Hysterese wuerde die Lampe dauernd zwischen
+// gedrosselt und voll hin und her springen (Akku erholt sich beim Drosseln).
+static const uint8_t  LOWBAT_STEPS = 3;
+static const uint16_t LOWBAT_MV[LOWBAT_STEPS]       = { 3300, 3150, 3000 };
+static const uint8_t  LOWBAT_MAX[LOWBAT_STEPS]      = {    3,    2,    0 };  // Index -> Stufe 4, 3, 1
+static const uint16_t LOWBAT_RESET_MV[LOWBAT_STEPS] = { 3400, 3250, 3100 };
+static const uint16_t CRITBAT_MV        = 2800;  // abschalten (Zelle bis 2,8 V nutzbar)
 static const uint16_t BAT_FILTER_MS     = 2000;  // so lange muss die Schwelle unterschritten sein
 
 // Akkuanzeige: Anzahl Blinker = 1 + Anzahl ueberschrittener Schwellen (1..6)
@@ -310,7 +309,7 @@ static uint16_t strobeT0  = 0;
 
 static uint16_t vbatMv    = 4000;   // gefiltert
 static int8_t   tempC     = 25;     // gefiltert
-static uint8_t  lowStage  = 0;      // Akku-Drossel: 0 = keine, 1 = max. Stufe 4, 2 = max. Stufe 3
+static uint8_t  lowStage  = 0;      // Akku-Drossel: 0 = keine, 1..3 = Schritt (max. Stufe 4 / 3 / 1)
 static uint8_t  thermMax  = NUM_LEVELS - 1;
 static uint16_t lowSince, critSince;
 static uint16_t lastMeasT = 0;
@@ -345,14 +344,12 @@ static uint16_t chgT0;              // Start der aktuellen Blink-Gruppe
 
 // Nur im Aus-Zustand (Messung ohne Last): Drossel schrittweise aufheben
 static void releaseLowStage() {
-    if (vbatMv >= LOWBAT_RESET_MV)                         lowStage = 0;
-    else if (vbatMv >= LOWBAT2_RESET_MV && lowStage > 1)   lowStage = 1;
+    while (lowStage && vbatMv >= LOWBAT_RESET_MV[lowStage - 1]) lowStage--;
 }
 
 static uint8_t maxLevel() {
     uint8_t m = thermMax;
-    if (lowStage == 1 && LOWBAT1_MAX_LEVEL < m) m = LOWBAT1_MAX_LEVEL;
-    if (lowStage >= 2 && LOWBAT2_MAX_LEVEL < m) m = LOWBAT2_MAX_LEVEL;
+    if (lowStage && LOWBAT_MAX[lowStage - 1] < m) m = LOWBAT_MAX[lowStage - 1];
     return m;
 }
 
@@ -531,8 +528,7 @@ static void monitorUpdate(uint16_t now) {
 
     if (mode != MODE_OFF) {
         // Akku schwach -> naechsten Drossel-Schritt + Doppelblink
-        uint16_t thr = (lowStage == 0) ? LOWBAT1_MV : LOWBAT2_MV;
-        if (lowStage < 2 && vbatMv < thr) {
+        if (lowStage < LOWBAT_STEPS && vbatMv < LOWBAT_MV[lowStage]) {
             if (since(lowSince, now) >= BAT_FILTER_MS) {
                 lowStage++;
                 lowSince = now;
