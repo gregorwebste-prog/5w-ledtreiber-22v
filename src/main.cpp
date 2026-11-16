@@ -387,6 +387,13 @@ static void startBatteryDisplay(uint16_t now) {
 //  Taster-Aktionen
 // ============================================================================
 static void turnOn(Mode m, uint16_t now) {
+    // vbatMv ist hier frisch und ohne Last gemessen (nach dem Aufwachen bzw. im Aus-Zustand)
+    if (vbatMv < CRITBAT_MV) {
+        startBatteryDisplay(now);   // Akku leer: gar nicht einschalten, nur 1 Blinker
+        return;
+    }
+    // Drossel-Schritt gleich passend zur Spannung setzen (nicht erst nach 2 s je Schritt)
+    while (lowStage < LOWBAT_STEPS && vbatMv < LOWBAT_MV[lowStage]) lowStage++;
     setMode(m, now);
     startBatteryDisplay(now);       // Akkustand auf der Taster-LED (Messung noch ohne Last)
 }
@@ -401,7 +408,8 @@ static void onClickImmediate(uint8_t n, uint16_t now) {
     switch (seqMode) {
     case MODE_OFF:
         if (n == 2)      turnOn(MODE_ON, now);      // 2. Klick: sofort ein, normal, letzte Stufe
-        else if (n == 3) setMode(MODE_STROBE, now); // 3. Klick gleich hinterher: Strobe
+        else if (n == 3 && mode != MODE_OFF)        // 3. Klick gleich hinterher: Strobe
+                         setMode(MODE_STROBE, now); //   (nicht, wenn Einschalten verweigert wurde)
         break;                                      // 1. und ab 4. Klick: nichts
     case MODE_STROBE:
         if (n == 2)      setMode(MODE_OFF, now);    // 2. Klick: sofort aus, 3. wird ignoriert

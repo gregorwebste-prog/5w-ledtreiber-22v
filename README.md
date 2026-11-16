@@ -174,6 +174,8 @@ Einschränkungen:
 | Akku ≥ **3,1 V** / **3,25 V** / **3,4 V** im ausgeschalteten Zustand (ohne Last) | jeweils ein Drosselschritt fällt weg (ab 3,4 V ganz aufgehoben) |
 | Hochschalten über die erlaubte Stufe (Akku-Drosselung) | Haupt-LED Doppelblink, Stufe bleibt |
 | Akku < **2,8 V** für 2 s | Licht aus |
+| Einschalten bei Akku < **2,8 V** (Ruhespannung) | Lampe bleibt aus, Taster-LED zeigt 1 Blinker (leer) |
+| Einschalten bei schwachem Akku | passender Drosselschritt wird **sofort** gesetzt (nicht erst nach je 2 s) |
 | Platine ≥ **70 °C** | max. Stufe 3 (Freigabe unter 65 °C) |
 | Platine ≥ **80 °C** | max. Stufe 1 (Freigabe unter 75 °C → Stufe 3) |
 | **15 min** ununterbrochen auf Stufe 5 | automatisch 1 Stufe runter, manuell wieder hochschaltbar (Timer startet neu) |
@@ -261,7 +263,7 @@ Programmiert wird über **UPDI** (Pin 6 / PA0, Stecker „Prog“) mit einem Ser
 (CP210x USB-UART, TX/RX über Diode/Widerstand auf UPDI). Upload: `pio run -t upload`.
 Falls der Adapter eine andere COM-Nummer bekommt, `upload_port` anpassen.
 
-Speicherbedarf: ca. 3,3 kB von 4 kB Flash, 58 Byte RAM.
+Speicherbedarf: ca. 3,4 kB von 4 kB Flash, 58 Byte RAM.
 
 ---
 
@@ -292,5 +294,6 @@ Speicherbedarf: ca. 3,3 kB von 4 kB Flash, 58 Byte RAM.
 | `v1.2` | Ladeerkennung über die Akkuspannung, Ladeanzeige auf der Taster-LED im Aus-Zustand |
 | `v1.3` | Akku-Drosselung in 2 Schritten (3,3 V → max. Stufe 4, 3,15 V → max. Stufe 3), Doppelblink beim Hochschalten über die erlaubte Stufe |
 | `v1.4` | 3. Drosselschritt: unter 3,0 V nur noch Stufe 1, Abschaltung erst bei 2,8 V |
+| `v1.5` | Kein Einschalten unter 2,8 V (nur 1 Blinker), Drosselschritt beim Einschalten sofort passend |
 
 Zurück auf eine Version: `git checkout v1.0` (danach `pio run -t upload`), zurück zum neuesten Stand: `git checkout main`.
