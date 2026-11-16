@@ -102,7 +102,7 @@ Startstufe beim ersten Einschalten nach Akkuwechsel: Stufe 3.
 
 ### Strobe
 
-30 ms an / 50 ms aus (≈ 12,5 Hz), mit der höchsten erlaubten Stufe.
+30 ms an / 50 ms aus (≈ 12,5 Hz), mit der höchsten erlaubten Stufe: normal 100 %, bei schwachem Akku dieselben Drosselstufen wie im Normalbetrieb (3,3 V → 45 %, 3,15 V → 20 %, 3,0 V → 3 %).
 
 ---
 

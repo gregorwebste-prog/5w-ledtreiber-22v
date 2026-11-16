@@ -620,6 +620,8 @@ static void outputUpdate(uint16_t now) {
         duty = LEVELS[lvl];
     } else if (mode == MODE_STROBE) {
         uint16_t ph = since(strobeT0, now) % (STROBE_ON_MS + STROBE_OFF_MS);
+        // Strobe blitzt mit der hoechsten erlaubten Stufe: normal 100 %, bei schwachem
+        // Akku dieselben Drossel-Stufen wie im Normalbetrieb (45 % -> 20 % -> 3 %)
         duty = (ph < STROBE_ON_MS) ? LEVELS[lim] : 0;
     }
 
