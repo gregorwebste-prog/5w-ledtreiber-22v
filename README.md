@@ -80,8 +80,8 @@ Die Umrechnung ADC → °C erfolgt über eine Tabelle (0 … 100 °C in 10-°C-S
 
 | Eingabe | Aus | An (normal) | Strobe |
 |---|---|---|---|
-| **Doppelklick** | beim 2. Klick sofort ein – immer normal, letzte Stufe | aus | beim 2. Klick sofort aus |
-| **3-fach-Klick** | beim 2. Klick ein, beim 3. Klick direkt Strobe | Strobe | aus, 3. Klick wird ignoriert |
+| **Doppelklick** | beim 2. Klick sofort ein – immer normal, letzte Stufe | beim 2. Klick sofort aus | beim 2. Klick sofort aus |
+| **3-fach-Klick** | beim 2. Klick ein, beim 3. Klick direkt Strobe | beim 2. Klick aus, beim 3. Klick wieder ein in Strobe | aus, 3. Klick wird ignoriert |
 | **kurzer Klick** (< 0,4 s) | nichts | heller | zurück auf normal |
 | **mittlerer Druck** (0,4 – 2 s) | nichts | dunkler | zurück auf normal |
 | **ganz lang** (≥ 2 s) | Akkustand | Akkustand | Akkustand |
@@ -89,8 +89,7 @@ Die Umrechnung ADC → °C erfolgt über eine Tabelle (0 … 100 °C in 10-°C-S
 - **Beim Einschalten** wird automatisch der Akkustand auf der Taster-LED angezeigt.
 - **Die Helligkeitsstufe wird gemerkt** (solange der Akku drin ist – der µC schläft nur).
 - Strobe wird nicht gemerkt: Einschalten per Doppelklick startet immer im normalen Licht.
-- Im normalen Modus wird das Ausschalten per Doppelklick ca. 350 ms verzögert, weil abgewartet wird,
-  ob noch ein 3. Klick (→ Strobe) kommt. Alle anderen Aktionen beim Doppelklick wirken sofort.
+- Alle Aktionen beim Doppel- und Dreifachklick wirken **sofort beim jeweiligen Klick** – kein Warten.
 
 ### Helligkeitsstufen
 
@@ -289,5 +288,6 @@ Speicherbedarf: ca. 3,3 kB von 4 kB Flash, 55 Byte RAM.
 | `v1.4` | 3. Drosselschritt: unter 3,0 V nur noch Stufe 1, Abschaltung erst bei 2,8 V |
 | `v1.5` | Kein Einschalten unter 2,8 V (nur 1 Blinker), Drosselschritt beim Einschalten sofort passend |
 | `v1.6` | Platine 2: USB-Erkennung über Teiler an PA1, Taster-LED zeigt beim Laden den Akkustand (TP4056 rot/grün für lädt/fertig) |
+| `v1.7` | Im Normalbetrieb: Doppelklick sofort aus, 3. Klick gleich hinterher wieder ein in Strobe |
 
 Zurück auf eine Version: `git checkout v1.0` (danach `pio run -t upload`), zurück zum neuesten Stand: `git checkout main`.

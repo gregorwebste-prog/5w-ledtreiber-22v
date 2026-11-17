@@ -18,8 +18,8 @@
  *     Doppelklick        : beim 2. Klick sofort ein, immer normal, mit letzter Stufe
  *     Dreifachklick      : beim 2. Klick ein, beim 3. Klick direkt Strobe
  *   AN (Dauerlicht):
- *     Doppelklick        : aus
- *     Dreifachklick      : Strobe
+ *     Doppelklick        : beim 2. Klick sofort aus
+ *     Dreifachklick      : beim 2. Klick aus, beim 3. Klick wieder ein in Strobe
  *     kurzer Klick       : heller   (5 Stufen)
  *     mittellanger Druck : dunkler  (0.4 s .. 2 s)
  *     15 min auf voller Stufe -> automatisch 1 Stufe runter (manuell wieder hoch moeglich)
@@ -413,7 +413,9 @@ static void onClickImmediate(uint8_t n, uint16_t now) {
         if (n == 2)      setMode(MODE_OFF, now);    // 2. Klick: sofort aus, 3. wird ignoriert
         break;
     case MODE_ON:
-        if (n == 3)      setMode(MODE_STROBE, now); // 3-fach: Strobe
+        if (n == 2)      setMode(MODE_OFF, now);    // 2. Klick: sofort aus
+        else if (n == 3 && vbatMv >= CRITBAT_MV)    // 3. Klick gleich hinterher: wieder ein, Strobe
+                         setMode(MODE_STROBE, now);
         break;
     }
 }
@@ -424,9 +426,7 @@ static void onClicksDone(uint8_t n, uint16_t now) {
         if (n == 1) {
             if (level < maxLevel())  level++;       // heller
             else if (lowStage)       startDoubleBlink(now);  // gesperrt wegen Akku -> Doppelblink
-        } else if (n == 2) {
-            setMode(MODE_OFF, now);                 // aus (muss auf moeglichen 3. Klick warten)
-        }
+        }                                           // 2 und 3 Klicks: schon sofort erledigt
     } else if (seqMode == MODE_STROBE && n == 1) {
         setMode(MODE_ON, now);                      // Strobe -> normal
     }
