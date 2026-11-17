@@ -259,9 +259,12 @@ Speicherbedarf: ca. 3,3 kB von 4 kB Flash, 55 Byte RAM.
 
 ## Offene Punkte / Hinweise zur Hardware
 
-1. **Überspannungsschutz fehlt (Platine 1 dadurch zerstört – Betrieb ohne LED):** Löst sich die COB, steigt die Ausgangsspannung bis zur Zerstörung des
+1. **Überspannungsschutz fehlt** – auf Platine 1 sind dadurch **zwei LM3410** gestorben: einmal Betrieb ohne LED, einmal war das **FB-Pad abgerissen** (FB sah immer 0 V → Regler voll auf). Jede Unterbrechung im LED- oder FB-Pfad zerstört den Treiber, löst sich z. B. die COB, steigt die Ausgangsspannung bis zur Zerstörung des
    LM3410 (SW max. 26,5 V). Abhilfe: **Z-Diode von VOUT (Kathode) direkt an den FB-Pin, und R_F = 100 Ω zwischen FB-Pin und Rsense-Oberkante.** Ohne R_F müsste die Z-Diode bei offener LED die vollen 250 mA führen (≈ 6 W). Zenerspannung knapp über der kalt gemessenen VF der COB, aber ≤ 24 V (z. B. BZX84C22 bei VF ≤ 21,5 V).
    Knapp, weil COB VF 20 – 25 V und LM3410 nur bis 24 V spezifiziert → echte VF der COB bei 250 mA messen (auch kalt).
+   **Vor dem ersten Einschalten eines neuen Treibers:** Durchgang FB-Pin → Rsense-Oberkante messen (≈ 0 Ω bzw. R_F),
+   beim ersten Einschalten Spannung an FB messen (≈ 190 mV, wenn die LED leuchtet), Ausgangsspannung im Blick behalten.
+   Mit Z-Diode direkt am FB-Pin ist auch ein abgerissener FB-Pfad abgesichert (Zenerstrom zieht FB hoch → Regler stoppt).
 2. **Ausgangskondensatoren C7/C10** müssen mindestens **35 V** Spannungsfestigkeit haben
    (Keramik verliert bei DC-Bias viel Kapazität).
 3. **Spule L1:** Sättigungsstrom ≥ 2,5 A (Spitzenstrom bei leerem Akku > 2 A).
