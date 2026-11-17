@@ -29,11 +29,11 @@ Bedienung über einen Taster mit eigener Taster-LED.
 | Rsense | 0,43 Ω + 0,33 Ω in Serie | = 0,76 Ω | → 250 mA LED-Strom (Schaltplan: 0,1 Ω) |
 | R8 | 100 kΩ | | NTC-Teiler nach VCC_Batt |
 | NTC | 100 kΩ | B = 3950 **angenommen** | auf GND-Pad neben LM3410 |
-| R9 / R10 | – | **nicht bestückt** | U_messen; Akku wird intern gemessen |
+| R9 / R10 | 100 kΩ / 100 kΩ | ab Platine 2 | Teiler USB-5 V → PA1 (USB-Erkennung); Akku wird intern gemessen |
 | R11 | 100 kΩ | | Pull-down an DIM (LED aus solange µC nicht treibt) |
 | R13 | 100 Ω | | Vorwiderstand Taster-LED D4 |
 | D4 | LED | | Taster-LED an PA3 |
-| D5 / D6 | LED grün / rot | | Ladestatus TP4056 (nicht am µC) |
+| D5 / D6 | LED grün / rot | | Ladestatus TP4056: grün = fertig, rot = lädt (nicht am µC) |
 | L1 | Speicherdrossel | Sättigungsstrom ≥ 2,5 A nötig | |
 | C7 / C10 | Ausgangskondensatoren | ≥ 35 V nötig | |
 | Akku | Li-Ion 18650 o. ä. | 3500 mAh | nutzbar bis 2,8 V (Bereich 3,0–2,8 V nur Stufe 1, ca. 20 mAh) |
@@ -45,7 +45,7 @@ Bedienung über einen Taster mit eigener Taster-LED.
 | 1 | VDD | VCC_Batt | Versorgung |
 | 2 | PA6 | taster | Taster gegen GND, interner Pull-up, Wake-up-Interrupt |
 | 3 | PA7 | LED_PWM | → LM3410 DIM (TCA0 WO0, per PORTMUX auf PA7 umgelegt), R11 100k Pull-down |
-| 4 | PA1 | U_messen | **nicht bestückt** – Eingang deaktiviert |
+| 4 | PA1 | U_messen | ab Platine 2: **USB-Erkennung**, 100k/100k-Teiler von USB-5 V |
 | 5 | PA2 | tmp | NTC 100k gegen GND, R8 100k gegen VCC_Batt |
 | 6 | PA0 | UPDI | Programmierung |
 | 7 | PA3 | taster_led | Taster-LED (aktiv high, D4 + R13 100 Ω) |
@@ -59,7 +59,7 @@ I_LED = V_FB / Rsense = 190 mV / 0,76 Ω ≈ **250 mA** → ca. 5,4 W an der COB
 
 ### Akkuspannung
 
-R9/R10 (U_messen) sind nicht bestückt. Da VDD direkt am Akku hängt, misst der ATtiny die
+R9/R10 (U_messen) messen ab Platine 2 die USB-Spannung, nicht den Akku. Da VDD direkt am Akku hängt, misst der ATtiny die
 **interne 1,1-V-Referenz gegen VDD** als ADC-Referenz:
 
 ```
@@ -136,30 +136,21 @@ Wenn das Licht aus ist, ist die Taster-LED aus (außer bei Akkuanzeige und Ladea
 
 ### Laden (im ausgeschalteten Zustand)
 
-Die Status-Pins des TP4056 gehen nur auf D5/D6, **nicht an den ATtiny**. Darum erkennt die Firmware
-das Laden über die Akkuspannung. Die RTC (PIT) weckt den ATtiny dazu **jede Sekunde** kurz auf.
+Ab Platine 2 ist ein **100k/100k-Teiler von der USB-5-V-Schiene auf PA1** bestückt (ehem. U_messen).
+Die RTC (PIT) weckt den ATtiny **jede Sekunde** kurz auf und misst PA1 (Referenz VDD, umgerechnet mit der Akkuspannung):
+USB erkannt ab 4,0 V, weg unter 3,0 V.
 
-| Ereignis | Erkennung |
+| LED | Bedeutung |
 |---|---|
-| Ladegerät angesteckt | Spannung springt innerhalb 1 s um ≥ 30 mV **nach oben** (Ladestrom × Innenwiderstand) |
-| Ladegerät abgesteckt | Spannung springt um ≥ 30 mV **nach unten** |
-| Akku voll | Spannung ≥ 4,05 V und steigt **20 min lang nicht mehr** (CV-Phase bzw. Ladeende) |
+| TP4056 **rot** (D6) | lädt |
+| TP4056 **grün** (D5) | fertig |
+| **Taster-LED (blau)** | solange USB steckt: **Akkustand 1–6 kurze Blitzer**, 2 s Pause, wiederholt |
 
-Anzeige auf der Taster-LED:
+- Die blaue Anzeige geht aus, wenn der Akku voll ist (≥ 4,05 V und 20 min kein Anstieg mehr) – dann zeigt die grüne LED „fertig“.
+- Wird die Lampe beim Laden eingeschaltet, zeigt die Taster-LED wie gewohnt die Temperatur; nach dem Ausschalten startet die Ladeanzeige wieder.
+- Der Akkustand beim Laden ist etwas zu hoch (Ladestrom × Innenwiderstand wird mitgemessen).
+- Während der Ladeanzeige schläft der ATtiny nicht (≈ 1–2 mA, kommt vom Ladegerät).
 
-| Zustand | Muster |
-|---|---|
-| lädt | **(Akkustand − 1) kurze Blitzer + 1 langer Blinker (0,7 s)**, 2 s Pause, wiederholt sich. Der lange Blinker heißt „lädt gerade“. Beispiel Akkustand 4: · · · ▬ |
-| voll | **1 min Dauerlicht**, dann aus |
-
-Einschränkungen:
-- Bei vollem Akku fließt kaum noch Strom, das Abstecken ist dann nicht mehr erkennbar.
-  Deshalb wird „voll“ nur 1 min angezeigt und danach abgeschaltet.
-- Erkannt wird nur das **Anstecken im ausgeschalteten Zustand**. Nach dem Ausschalten wartet die Firmware 20 s, bis sich der Akku erholt hat.
-  Wird die Lampe während des Ladens eingeschaltet, endet die Ladeanzeige. Nach dem Ausschalten erkennt sie das Laden erst beim nächsten Anstecken wieder.
-- Während der Ladeanzeige schläft der ATtiny nicht (≈ 1–2 mA, kommt ja vom Ladegerät).
-  Spätestens nach 10 h endet die Anzeige auf jeden Fall.
-- Der Akkustand während des Ladens ist etwas zu hoch, weil die Ladespannung mitgemessen wird.
 
 ---
 
@@ -228,9 +219,8 @@ Ruhestrom ca. 25–30 µA, hauptsächlich der NTC-Teiler (R8 + NTC ≈ 20 µA) u
 | `NTC_TAB[]` | | ADC-Werte für 0 … 100 °C (B = 3950) |
 | `THERM_WARN_C` / `THERM_HOT_C` | 70 / 80 | thermische Drosselung |
 | `TEMP_BLINK_PERIOD[]` | 1600, 800, 400, 150 | Blinkperioden Temperaturanzeige |
-| `CHG_STEP_MV` | 30 | Spannungssprung = Ladegerät an/ab |
+| `USB_ON_MV` / `USB_OFF_MV` | 4000 / 3000 | USB-Erkennung an PA1 |
 | `CHG_FULL_MIN_MV` / `CHG_FLAT_S` | 4050 / 1200 | „voll“: ab 4,05 V und 20 min kein Anstieg |
-| `CHG_FULL_SHOW_S` | 60 | Dauer der „voll“-Anzeige |
 
 ### Akkumessung kalibrieren
 
@@ -263,14 +253,14 @@ Programmiert wird über **UPDI** (Pin 6 / PA0, Stecker „Prog“) mit einem Ser
 (CP210x USB-UART, TX/RX über Diode/Widerstand auf UPDI). Upload: `pio run -t upload`.
 Falls der Adapter eine andere COM-Nummer bekommt, `upload_port` anpassen.
 
-Speicherbedarf: ca. 3,4 kB von 4 kB Flash, 58 Byte RAM.
+Speicherbedarf: ca. 3,3 kB von 4 kB Flash, 55 Byte RAM.
 
 ---
 
 ## Offene Punkte / Hinweise zur Hardware
 
-1. **Überspannungsschutz fehlt:** Löst sich die COB, steigt die Ausgangsspannung bis zur Zerstörung des
-   LM3410 (SW max. 26,5 V). Abhilfe: Z-Diode + Widerstand zum FB-Pin (Datenblatt Figure 18).
+1. **Überspannungsschutz fehlt (Platine 1 dadurch zerstört – Betrieb ohne LED):** Löst sich die COB, steigt die Ausgangsspannung bis zur Zerstörung des
+   LM3410 (SW max. 26,5 V). Abhilfe: **Z-Diode von VOUT (Kathode) direkt an den FB-Pin, und R_F = 100 Ω zwischen FB-Pin und Rsense-Oberkante.** Ohne R_F müsste die Z-Diode bei offener LED die vollen 250 mA führen (≈ 6 W). Zenerspannung knapp über der kalt gemessenen VF der COB, aber ≤ 24 V (z. B. BZX84C22 bei VF ≤ 21,5 V).
    Knapp, weil COB VF 20 – 25 V und LM3410 nur bis 24 V spezifiziert → echte VF der COB bei 250 mA messen (auch kalt).
 2. **Ausgangskondensatoren C7/C10** müssen mindestens **35 V** Spannungsfestigkeit haben
    (Keramik verliert bei DC-Bias viel Kapazität).
@@ -295,5 +285,6 @@ Speicherbedarf: ca. 3,4 kB von 4 kB Flash, 58 Byte RAM.
 | `v1.3` | Akku-Drosselung in 2 Schritten (3,3 V → max. Stufe 4, 3,15 V → max. Stufe 3), Doppelblink beim Hochschalten über die erlaubte Stufe |
 | `v1.4` | 3. Drosselschritt: unter 3,0 V nur noch Stufe 1, Abschaltung erst bei 2,8 V |
 | `v1.5` | Kein Einschalten unter 2,8 V (nur 1 Blinker), Drosselschritt beim Einschalten sofort passend |
+| `v1.6` | Platine 2: USB-Erkennung über Teiler an PA1, Taster-LED zeigt beim Laden den Akkustand (TP4056 rot/grün für lädt/fertig) |
 
 Zurück auf eine Version: `git checkout v1.0` (danach `pio run -t upload`), zurück zum neuesten Stand: `git checkout main`.

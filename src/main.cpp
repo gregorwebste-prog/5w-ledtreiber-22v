@@ -4,7 +4,8 @@
  * Hardware (laut Schaltplan):
  *   PA6 (Pin 2) = Taster gegen GND (interner Pull-up)
  *   PA7 (Pin 3) = LED_PWM -> LM3410 DIM (TCA0 WO0, alternativer Pin)
- *   PA1 (Pin 4) = U_messen  -> NICHT bestueckt, Akku wird intern gemessen (VDD = VCC_Batt)
+ *   PA1 (Pin 4) = USB-Erkennung: 100k/100k-Teiler von der USB-5-V-Schiene (ab Platine 2)
+ *                 (Akku wird intern gemessen, VDD = VCC_Batt)
  *   PA2 (Pin 5) = tmp       -> NTC 100k gegen GND, R8 100k gegen VCC_Batt
  *   PA3 (Pin 7) = taster_led (aktiv high, D4 + R13)
  *   PA0 (Pin 6) = UPDI
@@ -110,22 +111,18 @@ static const int8_t THERM_HYST_C  = 5;
 //   < 40 C: Dauerlicht, 40..49: langsam, 50..59, 60..69, >= 70: sehr schnell
 static const uint16_t TEMP_BLINK_PERIOD[4] = { 1600, 800, 400, 150 };
 
-// ---- Ladeerkennung (nur im Aus-Zustand) ----
-// Die Status-Pins des TP4056 gehen nur auf D5/D6, nicht an den uC. Deshalb Erkennung
-// ueber die Akkuspannung, gemessen 1x pro Sekunde (RTC-PIT weckt aus dem Sleep):
-//  - Ladegeraet an:  Spannung springt um I_Lade * R_innen nach oben (typ. 50..100 mV)
-//  - Ladegeraet ab:  Spannung springt um denselben Betrag nach unten
-//  - voll:           Spannung steigt lange nicht mehr (CV-Phase / Ladeende)
-// Alles relativ ausgewertet -> unabhaengig von der Toleranz der internen Referenz.
-static const uint16_t CHG_STEP_MV     = 30;        // Sprung von Sekunde zu Sekunde
-static const uint16_t CHG_SETTLE_S    = 20;        // nach dem Ausschalten erholt sich der Akku -> abwarten
+// ---- Laden (nur im Aus-Zustand) ----
+// USB-5V ueber 100k/100k-Teiler an PA1, gemessen 1x pro Sekunde (RTC-PIT weckt aus dem
+// Sleep). Laden/fertig zeigt der TP4056 selbst (rot/gruen), die blaue Taster-LED zeigt
+// waehrend USB steckt den Akkustand (1..6 Blinker, wiederholt).
+// "Fertig" fuer die blaue LED: Spannung steigt lange nicht mehr -> Anzeige aus.
+static const uint16_t USB_ON_MV       = 4000;      // USB erkannt (Teiler -> 2,0 V an PA1)
+static const uint16_t USB_OFF_MV      = 3000;      // USB weg (Hysterese)
 static const uint16_t CHG_FULL_MIN_MV = 4050;      // "voll" erst ab dieser Spannung moeglich
 static const uint16_t CHG_FLAT_MV     = 5;         // Anstieg kleiner als das gilt als "steigt nicht mehr"
 static const uint16_t CHG_FLAT_S      = 20 * 60;   // so lange kein Anstieg -> voll
-static const uint16_t CHG_FULL_SHOW_S = 60;        // "voll" so lange anzeigen, dann Anzeige aus
 static const uint16_t CHG_MAX_S       = 10 * 3600; // Sicherheit: spaetestens dann Anzeige beenden
-static const uint16_t CHG_LONG_MS     = 700;       // langer Blinker = "laedt gerade"
-static const uint16_t CHG_GAP_MS      = 2000;      // Pause zwischen den Gruppen
+static const uint16_t CHG_GAP_MS      = 2000;      // Pause zwischen den Blink-Gruppen
 
 // ============================================================================
 //  Zeitbasis: TCB0, 1 ms Interrupt
@@ -203,7 +200,7 @@ static void initPins() {
     PORTA.OUTCLR = PWM_bm | TLED_bm;
     PORTA.PIN6CTRL = PORT_PULLUPEN_bm | PORT_ISC_BOTHEDGES_gc;   // Taster, Wake-up
     PORTA.PIN2CTRL = PORT_ISC_INPUT_DISABLE_gc;                  // NTC (analog)
-    PORTA.PIN1CTRL = PORT_ISC_INPUT_DISABLE_gc;                  // U_messen, unbestueckt
+    PORTA.PIN1CTRL = PORT_ISC_INPUT_DISABLE_gc;                  // USB-Teiler (analog)
 }
 
 // ============================================================================
@@ -332,11 +329,13 @@ static const uint16_t BATT_PAUSE_MS = 1000;  // Pause davor und danach
 static const uint16_t BATT_ON_MS    = 120;
 static const uint16_t BATT_OFF_MS   = 180;
 
-// Ladeerkennung
-enum ChgState : uint8_t { CHG_NONE, CHG_ACTIVE, CHG_FULL };
+// Laden
+//   CHG_NONE:   kein USB
+//   CHG_ACTIVE: USB steckt, Akkustand wird angezeigt
+//   CHG_DONE:   USB steckt, Akku voll -> blaue LED aus (gruene TP4056-LED zeigt "fertig")
+enum ChgState : uint8_t { CHG_NONE, CHG_ACTIVE, CHG_DONE };
 static ChgState chgState  = CHG_NONE;
-static uint16_t chgSettleS = 0;     // Sekunden im Aus-Zustand (Erholung abwarten)
-static uint16_t chgRefMv;           // Messwert der letzten Sekunde
+static bool     usbPresent = false;
 static uint16_t chgMaxMv;           // hoechster Wert waehrend der Ladung
 static uint16_t chgS, chgFlatS;     // Ladedauer / Sekunden ohne Anstieg
 static uint8_t  chgLevel;           // Akkustand 1..6 fuer die Anzeige
@@ -365,8 +364,7 @@ static void setMode(Mode m, uint16_t now) {
     lowSince = critSince = now;
     secT = now;
     fullSec = 0;
-    chgState = CHG_NONE;            // Ladeanzeige nur im Aus-Zustand
-    chgSettleS = 0;                 // nach jedem Moduswechsel neu einschwingen lassen
+    chgState = CHG_NONE;            // Ladeanzeige nur im Aus-Zustand (startet nach dem Ausschalten neu)
     if (m != MODE_OFF && lowStage) startDoubleBlink(now);  // Erinnerung: Akku schwach
 }
 
@@ -562,50 +560,44 @@ static void monitorUpdate(uint16_t now) {
 // ============================================================================
 //  Ladeerkennung: 1x pro Sekunde im Aus-Zustand aufrufen
 // ============================================================================
+// USB-Spannung: Teiler 1:2 an PA1, ADC-Referenz ist VDD (= Akku, vbat in mV)
+static uint16_t readUsbMv(uint16_t vbat) {
+    uint32_t acc = adcRead(ADC_MUXPOS_AIN1_gc);            // Summe von 16 Samples
+    return (uint16_t)(acc * vbat * 2UL / (1023UL * 16UL));
+}
+
 static void chargeTick(uint16_t now) {
     if (mode != MODE_OFF) return;
     uint16_t v = readVbatMv();                  // ungefiltert, PWM ist aus -> ohne Last
+    uint16_t u = readUsbMv(v);
+
+    if (usbPresent) { if (u < USB_OFF_MV) usbPresent = false; }
+    else            { if (u > USB_ON_MV)  usbPresent = true;  }
+
+    if (!usbPresent) {                          // abgesteckt
+        chgState = CHG_NONE;
+        return;
+    }
+    chgLevel = battLevel(v);
 
     switch (chgState) {
-    case CHG_NONE:
-        if (chgSettleS < CHG_SETTLE_S) {
-            chgSettleS++;                       // Akku erholt sich noch vom Betrieb
-        } else if (v >= chgRefMv + CHG_STEP_MV) {
-            chgState = CHG_ACTIVE;              // Sprung nach oben -> Ladegeraet angesteckt
-            chgS = chgFlatS = 0;
-            chgMaxMv = v;
-            chgT0 = now;
-        }
+    case CHG_NONE:                              // gerade angesteckt (oder Lampe ausgeschaltet)
+        chgState = CHG_ACTIVE;
+        chgS = chgFlatS = 0;
+        chgMaxMv = v;
+        chgT0 = now;
         break;
 
     case CHG_ACTIVE:
-        if (v + CHG_STEP_MV <= chgRefMv) {      // Sprung nach unten -> abgesteckt
-            chgState = CHG_NONE;
-            chgSettleS = 0;
-            break;
-        }
         if (v > chgMaxMv + CHG_FLAT_MV) { chgMaxMv = v; chgFlatS = 0; }
         else                              chgFlatS++;
-        if (chgMaxMv >= CHG_FULL_MIN_MV && chgFlatS >= CHG_FLAT_S) {
-            chgState = CHG_FULL;                // steigt nicht mehr -> voll
-            chgS = 0;
-        } else if (++chgS >= CHG_MAX_S) {
-            chgState = CHG_NONE;                // Notbremse, falls "voll" nie erkannt wird
-            chgSettleS = 0;
-        }
+        if ((chgMaxMv >= CHG_FULL_MIN_MV && chgFlatS >= CHG_FLAT_S) || ++chgS >= CHG_MAX_S)
+            chgState = CHG_DONE;                // voll (bzw. Notbremse) -> blaue LED aus
         break;
 
-    case CHG_FULL:
-        // Wann abgesteckt wird, ist bei vollem Akku nicht erkennbar (kaum Strom
-        // -> kein Sprung). Deshalb "voll" nur eine Zeit lang zeigen, dann aus.
-        if (++chgS >= CHG_FULL_SHOW_S) {
-            chgState = CHG_NONE;
-            chgSettleS = 0;
-        }
+    case CHG_DONE:                              // bleibt so, bis USB abgesteckt wird
         break;
     }
-    chgRefMv = v;
-    chgLevel = battLevel(v);
 }
 
 // ============================================================================
@@ -648,16 +640,12 @@ static void outputUpdate(uint16_t now) {
             battShowActive = false;
         }
     } else if (mode == MODE_OFF && chgState == CHG_ACTIVE) {
-        // Laden: (Akkustand-1) kurze Blitzer + 1 langer Blinker ("laedt"), Pause, wiederholen
+        // Laden: Akkustand als 1..6 kurze Blitzer (wie die normale Akkuanzeige), Pause, wiederholen
         uint16_t shortP = BATT_ON_MS + BATT_OFF_MS;
-        uint16_t shorts = (uint16_t)(chgLevel - 1) * shortP;
-        uint16_t cyc    = shorts + CHG_LONG_MS + CHG_GAP_MS;
+        uint16_t blinks = (uint16_t)chgLevel * shortP;
         uint16_t e      = since(chgT0, now);
-        if (e >= cyc) { chgT0 = now; e = 0; }   // neue Gruppe (neuer Akkustand wird uebernommen)
-        if (e < shorts) tled = (e % shortP) < BATT_ON_MS;
-        else            tled = (e - shorts) < CHG_LONG_MS;
-    } else if (mode == MODE_OFF && chgState == CHG_FULL) {
-        tled = true;                            // voll: Dauerlicht
+        if (e >= blinks + CHG_GAP_MS) { chgT0 = now; e = 0; }  // neue Gruppe, aktueller Akkustand
+        tled = (e < blinks) && ((e % shortP) < BATT_ON_MS);
     } else if (mode != MODE_OFF) {
         // Temperaturanzeige
         if (tempC < 40) {
@@ -676,7 +664,7 @@ static void outputUpdate(uint16_t now) {
 // ============================================================================
 static bool canSleep() {
     return mode == MODE_OFF && !btnRaw && !btnStable && clicks == 0 &&
-           !battShowActive && !blinkActive && chgState == CHG_NONE;
+           !battShowActive && !blinkActive && chgState != CHG_ACTIVE;
 }
 
 static void goToSleep() {
